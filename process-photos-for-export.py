@@ -59,13 +59,14 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
-import os
+import argparse
+import copy
 import glob
 import json
+import os
 import pathlib
 import re
 import subprocess
-import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -280,7 +281,7 @@ def rule_match(exif_tags, rule):
 def append_metadata_overrides(exif_tags, metadata_options):
     rules = get_metadata_override_rules(metadata_options.overrides_file)
     if rules:
-        new_tags = exif_tags
+        new_tags = copy.deepcopy(exif_tags)
         for rule in rules:
             if rule_match(exif_tags, rule):
                 for t in rule.tags:
