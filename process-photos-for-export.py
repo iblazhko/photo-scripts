@@ -27,8 +27,8 @@ into 2_EXPORT:
 * White border is added (around 5%, optional)
     [--border | --no-border] (default=True)
 * Basic EXIF metadata is copied from raw / OOC JPEG files to resulting JPEGs
-* Extra EXIF tags can be added using `--extra_exif key=value key=value ...`, e.g.
-    --extra_exif Exif.Photo.LensMake=Voightlander 'Exif.Photo.LensModel=50mm f/2 APO Lanthar'
+* EXIF data can be modified using
+    [--exif <overrides rules file>] (default=None)
 
 Script requires following tools to be installed:
 
@@ -61,12 +61,15 @@ THE SOFTWARE.
 
 import os
 import glob
+import json
 import pathlib
+import re
 import subprocess
 import argparse
 from dataclasses import dataclass
+from pathlib import Path
 
-OOC_FORMAT = "jpg"  # Optional
+OOC_FORMAT = "jpg"
 EDIT_FORMAT = "tif"
 EXPORT_FORMAT = "jpg"
 
@@ -75,6 +78,8 @@ BORDER_SEPARATOR_LIGHT_COLOR = "icc-color(gray, 0.8)"
 BORDER_COLOR = "icc-color(gray, 0.96)"
 
 EXIF_TAGS = [
+    "Exif.Image.Artist",
+    "Exif.Image.Copyright",
     "Exif.Image.DateTime",
     "Exif.Image.Make",
     "Exif.Image.Model",
@@ -112,7 +117,7 @@ class ProjectLocations:
 
 
 @dataclass
-class SeparatorOptions:
+class BorderSeparatorOptions:
     color: str
     size: int
 
@@ -122,7 +127,7 @@ class BorderOptions:
     color: str
     size: int
     bottom_padding: int
-    separators: list[SeparatorOptions]
+    separators: list[BorderSeparatorOptions]
 
 
 @dataclass
@@ -137,13 +142,18 @@ class ResizeOptions:
 class ExifTag:
     key: str
     value: str
+    value_type: str = "Ascii"
 
 
 @dataclass
 class MetadataOptions:
-    artist: str
-    copyright: str
-    extra_exif: list[ExifTag]
+    overrides_file: str
+
+
+@dataclass
+class MetadataOverrideRule:
+    pattern: ExifTag
+    tags: list[ExifTag]
 
 
 @dataclass
@@ -172,9 +182,9 @@ def get_resize_options(size, add_border):
                         100,
                         20,
                         [
-                            SeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
-                            SeparatorOptions(BORDER_SEPARATOR_DARK_COLOR, 2),
-                            SeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
+                            BorderSeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
+                            BorderSeparatorOptions(BORDER_SEPARATOR_DARK_COLOR, 2),
+                            BorderSeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
                         ],
                     )
                     if add_border
@@ -184,17 +194,17 @@ def get_resize_options(size, add_border):
             )
         case "medium":
             return ResizeOptions(
+                2000,
                 1500,
-                1200,
                 (
                     BorderOptions(
                         BORDER_COLOR,
                         40,
                         10,
                         [
-                            SeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
-                            SeparatorOptions(BORDER_SEPARATOR_DARK_COLOR, 1),
-                            SeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
+                            BorderSeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
+                            BorderSeparatorOptions(BORDER_SEPARATOR_DARK_COLOR, 1),
+                            BorderSeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
                         ],
                     )
                     if add_border
@@ -204,17 +214,17 @@ def get_resize_options(size, add_border):
             )
         case "small":
             return ResizeOptions(
+                900,
                 800,
-                700,
                 (
                     BorderOptions(
                         BORDER_COLOR,
                         20,
                         5,
                         [
-                            SeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
-                            SeparatorOptions(BORDER_SEPARATOR_DARK_COLOR, 1),
-                            SeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
+                            BorderSeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
+                            BorderSeparatorOptions(BORDER_SEPARATOR_DARK_COLOR, 1),
+                            BorderSeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
                         ],
                     )
                     if add_border
@@ -226,16 +236,58 @@ def get_resize_options(size, add_border):
             raise Exception(f"Size {size} is not supported")
 
 
-def get_metadata_options(artist, copyright, extra_exif):
-    extra_kvp = []
-    if extra_exif:
-        for x in extra_exif:
-            kvp = x.split("=", 1)
-            extra_kvp.append(ExifTag(kvp[0], kvp[1]))
+def get_metadata_options(overrides_rules_file):
+    return MetadataOptions(overrides_rules_file if overrides_rules_file else None)
 
-    return MetadataOptions(
-        artist if artist else None, copyright if copyright else None, extra_kvp
+
+def map_exif_tag_from_json(tag_json):
+    return ExifTag(
+        tag_json["tag"],
+        tag_json["value"],
+        tag_json["value_type"] if "value_type" in tag_json else "Ascii",
     )
+
+
+def map_exif_override_rule_from_json(rule_json):
+    return MetadataOverrideRule(
+        (
+            map_exif_tag_from_json(rule_json["pattern"])
+            if "pattern" in rule_json
+            else None
+        ),
+        [map_exif_tag_from_json(x) for x in rule_json["tags"]],
+    )
+
+
+def get_metadata_override_rules(rules_file):
+    if rules_file:
+        rules_json = json.loads(Path(rules_file).read_text())
+        return [map_exif_override_rule_from_json(x) for x in rules_json["rules"]]
+    else:
+        return []
+
+
+def rule_match(exif_tags, rule):
+    if rule.pattern:
+        k = rule.pattern.key.replace(".", "\\.")
+        v = rule.pattern.value
+        p = re.compile(f".*{k}.*{v}.*", re.IGNORECASE)
+        return next((True for t in exif_tags if p.match(t)), False)
+    else:
+        return True
+
+
+def append_metadata_overrides(exif_tags, metadata_options):
+    rules = get_metadata_override_rules(metadata_options.overrides_file)
+    if rules:
+        new_tags = exif_tags
+        for rule in rules:
+            if rule_match(exif_tags, rule):
+                for t in rule.tags:
+                    new_tags.extend([f"set {t.key} {t.value_type} {t.value}"])
+        return new_tags
+    else:
+        return exif_tags
 
 
 def get_project_locations():
@@ -332,74 +384,48 @@ def copy_metadata(file, locations, metadata_options):
                 raise Exception(f'No "{pattern}" files found to copy metadata from')
         source_file = matching_raw_files[0]
 
-    exiv2_cleanup = ["exiv2", "rm", target_file]
+    exiv2_cleanup_process = subprocess.run(["exiv2", "rm", target_file])
+    if exiv2_cleanup_process.returncode != 0:
+        raise Exception(f"Could not clean metadata for {target_file}")
 
     exiv2_tags_options = []
     for x in EXIF_TAGS:
         exiv2_tags_options.extend(["-K", x])
-
     exiv2_export = ["exiv2", "-PVk"] + exiv2_tags_options + [source_file]
+    exiv2_export_process = subprocess.run(
+        exiv2_export, capture_output=True, encoding="utf-8"
+    )
+    if exiv2_export_process.returncode != 0:
+        raise Exception(f"Could not get metadata from {source_file}")
 
-    # fmt: off
-    trim_trailing_spaces = [
-        "sed",
-        "-e", "s/^[[:space:]]*//",
-        "-e", "s/[[:space:]]*$//",
-    ]
-    # fmt: on
+    # '.strip()' is a workaround for https://github.com/Exiv2/exiv2/issues/2836
+    exif_tags = append_metadata_overrides(
+        [x.strip() for x in exiv2_export_process.stdout.splitlines()], metadata_options
+    )
 
+    exiv2_import_input = os.linesep.join(exif_tags)
     exiv2_import = ["exiv2", "-m-", target_file]
-
-    subprocess.run(exiv2_cleanup)
-
-    # exiv2 export output piped into exiv2 import input
-    exiv2_export_process = subprocess.Popen(exiv2_export, stdout=subprocess.PIPE)
-
-    # workaround for https://github.com/Exiv2/exiv2/issues/2836
-    trim_trailing_spaces_process = subprocess.Popen(
-        trim_trailing_spaces, stdin=exiv2_export_process.stdout, stdout=subprocess.PIPE
+    exiv2_import_process = subprocess.run(
+        exiv2_import, input=exiv2_import_input, text=True
     )
-
-    exiv2_import_process = subprocess.Popen(
-        exiv2_import, stdin=trim_trailing_spaces_process.stdout
-    )
-
-    exiv2_import_process.wait()
-    trim_trailing_spaces_process.wait()
-    exiv2_export_process.wait()
-
-    extra_tags = []
-    if metadata_options.artist:
-        extra_tags.extend(
-            ["-M", f"set Exif.Image.Artist Ascii {metadata_options.artist}"]
-        )
-
-    if metadata_options.copyright:
-        extra_tags.extend(
-            ["-M", f"set Exif.Image.Copyright Ascii {metadata_options.copyright}"]
-        )
-
-    if metadata_options.extra_exif:
-        for x in metadata_options.extra_exif:
-            extra_tags.extend(["-M", f"set {x.key} Ascii {x.value}"])
-
-    if not empty(extra_tags):
-        exif_copyright = ["exiv2"] + extra_tags + [target_file]
-        subprocess.run(exif_copyright)
+    if exiv2_import_process.returncode != 0:
+        raise Exception(f"Could not set metadata for {target_file}")
 
 
 def process_for_sharing(locations, resize_options, metadata_options):
-    print(f'PROJECT:   "{locations.project_dir}"')
-    print(f'RAW:       "{locations.raw_dir}"')
-    print(f'EDIT:      "{locations.edit_dir}"')
-    print(f'EXPORT:    "{locations.export_dir}"')
-    print(f"Size:      {resize_options.image_width}x{resize_options.image_height}")
-    print(f"Border:    {'True' if resize_options.border else 'False'}")
-    print(f"Artist:    {metadata_options.artist if metadata_options.artist else 'N/A'}")
+    print(f'PROJECT        : "{locations.project_dir}"')
+    print(f'RAW            : "{locations.raw_dir}"')
+    print(f'EDIT           : "{locations.edit_dir}"')
+    print(f'EXPORT         : "{locations.export_dir}"')
+    print("---------------")
     print(
-        f"Copyright: {metadata_options.copyright if metadata_options.copyright else 'N/A'}"
+        f"Size           : {resize_options.image_width}x{resize_options.image_height}"
     )
-    print("=" * 65)
+    print(f"Border         : {'True' if resize_options.border else 'False'}")
+    print(
+        f"EXIF overrides : {metadata_options.overrides_file if metadata_options.overrides_file else 'None'}"
+    )
+    print("=" * 80)
 
     tiff_files = sorted(get_edited_files(locations.edit_dir))
 
@@ -418,39 +444,21 @@ if __name__ == "__main__":
         type=str,
         choices=["large", "medium", "small"],
         help="exported image size",
-        default="large",  # fmt: on
+        default="large",
     )
     parser.add_argument(
         "--border",
         type=bool,
-        help="add white border",
+        help="add border",
         action=argparse.BooleanOptionalAction,
         default=True,
     )
-    parser.add_argument(
-        "--artist",
-        type=str,
-        help="add artist tag",
-        action=argparse.BooleanOptionalAction,
-        default="Ivan Blazhko",
-    )
-    parser.add_argument(
-        "--copyright",
-        type=str,
-        help="add copyright tag",
-        action=argparse.BooleanOptionalAction,
-        default="(C) Ivan Blazhko. All rights reserved.",
-    )
-    parser.add_argument(
-        "--extra_exif", type=str, help="extra EXIF tags (key=value)", nargs="*"
-    )
+    parser.add_argument("--exif", type=str, help="EXIF override rules file")
 
     args = parser.parse_args()
 
     locations = get_project_locations()
     resize_options = get_resize_options(args.size, args.border)
-    metadata_options = get_metadata_options(
-        args.artist, args.copyright, args.extra_exif
-    )
+    metadata_options = get_metadata_options(args.exif)
 
     process_for_sharing(locations, resize_options, metadata_options)

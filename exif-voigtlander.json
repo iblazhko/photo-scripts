@@ -1,0 +1,100 @@
+{
+    "rules": [
+        {
+            "tags": [
+                {
+                    "tag": "Exif.Image.Artist",
+                    "value": "Ivan Blazhko"
+                },
+                {
+                    "tag": "Exif.Image.Copyright",
+                    "value": "(C) Ivan Blazhko. All rights reserved."
+                }
+            ]
+        },
+        {
+            "pattern": {
+                "tag": "Exif.Photo.LensModel",
+                "value": "Leica M 28mm"
+            },
+            "tags": [
+                {
+                    "tag": "Exif.Photo.LensMake",
+                    "value": "Voigtlander"
+                },
+                {
+                    "tag": "Exif.Photo.LensModel",
+                    "value": "Voigtlander 28mm f2.8 Color Skopar VM"
+                },
+                {
+                    "tag": "Exif.Photo.LensSpecification",
+                    "value": "280/10 280/10 280/100 2200/100",
+                    "value_type": "Rational"
+                }
+            ]
+        },
+        {
+            "pattern": {
+                "tag": "Exif.Photo.LensModel",
+                "value": "Leica M 35mm"
+            },
+            "tags": [
+                {
+                    "tag": "Exif.Photo.LensMake",
+                    "value": "Voigtlander"
+                },
+                {
+                    "tag": "Exif.Photo.LensModel",
+                    "value": "Voigtlander 35mm f1.5 Nokton VM"
+                },
+                {
+                    "tag": "Exif.Photo.LensSpecification",
+                    "value": "350/10 350/10 150/100 1600/100",
+                    "value_type": "Rational"
+                }
+            ]
+        },
+        {
+            "pattern": {
+                "tag": "Exif.Photo.LensModel",
+                "value": "Leica M 50mm"
+            },
+            "tags": [
+                {
+                    "tag": "Exif.Photo.LensMake",
+                    "value": "Voigtlander"
+                },
+                {
+                    "tag": "Exif.Photo.LensModel",
+                    "value": "Voigtlander 50mm f2.2 Color Skopar VM"
+                },
+                {
+                    "tag": "Exif.Photo.LensSpecification",
+                    "value": "500/10 500/10 220/100 1600/100",
+                    "value_type": "Rational"
+                }
+            ]
+        },
+        {
+            "pattern": {
+                "tag": "Exif.Photo.LensModel",
+                "value": "Leica M 75mm"
+            },
+            "tags": [
+                {
+                    "tag": "Exif.Photo.LensMake",
+                    "value": "Voigtlander"
+                },
+                {
+                    "tag": "Exif.Photo.LensModel",
+                    "value": "Voigtlander 75mm f1.9 Ultron VM"
+                },
+                {
+                    "tag": "Exif.Photo.LensSpecification",
+                    "value": "750/10 750/10 190/100 1600/100",
+                    "value_type": "Rational"
+                }
+            ]
+        }
+    ]
+}
