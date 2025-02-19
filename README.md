@@ -2,46 +2,51 @@
 
 Various photo manipulation scripts.
 
-These scripts assume following project structure:
+These scripts assume following library structure:
 
 ```
-PROJECT/
-    0_RAW/
-        file1.dng
-        file1.jpg
-        file2.nef
-        file2.jpg
+LIBRARY/
+    PROJECT/            -- typically "YYYY-MM-DD <Description>"
+        0_RAW/          -- files from camera
+            file1.dng
+            file1.jpg   -- typically filenames are in
+            file2.nef   -- YYYYMMDD_hhmm_nnnn format   
+            file2.jpg
+            file3.raf
+        1_EDIT/         -- files exported from editing application
+            file1.tif
+            file1-BW.tif
+            file2.tif
+        2_EXPORT/       -- final images suitable for viewing / sharing
+            file1.jpg
+            file1-BW.jpg
+            file2.jpg
+        file1.dng       -- files selected for edit copied to the project's root
         file3.raf
-    1_EDIT/
-        file1.tif
-        file1-BW.tif
-        file2.tif
-    2_EXPORT/
-        file1.jpg
-        file1-BW.jpg
-        file2.jpg
 ```
 
 Workflow looks like this:
 
 1. Create a project directories following the structure above
-2. Copy files from camera to `0_RAW`
-3. Run `rename_raw_photos.py`
-4. Optional: cull and select photos for edit
-5. Edit photo (Lightroom, Darktable etc.)
-6. Export edits as full-size TIFFs to `1_EDIT`
-7. Run `process-photos-for-export.py`
+2. Copy files from camera to `PROJECT/0_RAW`
+3. Run `rename-raw-photos.py`
+4. Cull and select photos for edit, copy selects to `PROJECT/`
+5. Edit selected photos `PROJECT/` (using Lightroom, Darktable etc.)
+6. Export edits as full-size TIFFs to `PROJECT/1_EDIT`
+7. Run `process-photos-for-export.py`, take final images from `PROJECT/1_EXPORT`
+8. Optional: clean up temporary files and optimise disk usage:
+   run `clean-photo-library.py`
 
 ## Renaming raw files
 
-`rename_raw_photos.py` script renames files to have following naming convention:
+`rename-raw-photos.py` script renames files to have following naming convention:
 
 ```
 YYYYMMDD_hhmm_nnnn.ext
 ```
 
-i.e. file name is composed from timestamp (date + time with minutes precision)
-followed by the file number assigned by the camera.
+i.e. a file name is composed from timestamp (date + time with minutes precision)
+followed by image number assigned by the camera.
 
 Timestamp value is based on EXIF metadata, so make sure that the camera datetime
 is set correctly.
@@ -56,7 +61,7 @@ Having file number assigned by the camera as a suffix
 Usage example:
 
 ```bash
-rename_raw_photos.py
+rename-raw-photos.py
 ```
 
 ## Processing photos for export / sharing
@@ -171,3 +176,19 @@ adapter, we want to replace this information with the actual lens make and
 model.
 
 See [exif.json](./exif-voigtlander.json) in this repository for a complete example.
+
+## Library cleanup
+
+`cleanup-photo-library.py` script
+
+* removes edits from `PROJECT/1_EDIT` - these files can
+  always be re-exported from editind application
+* uses hard links for RAW selects in `PROJECT/`
+  (links them to corresponding files in `PROJECT/0_RAW`)
+  to save disk space.
+
+Usage example:
+
+```bash
+cleanup-photo-library.py $HOME/Pictures/Library
+```
