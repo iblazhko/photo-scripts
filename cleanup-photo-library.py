@@ -100,6 +100,24 @@ def get_file_md5_hash(file_path):
     return hashlib.md5(open(file_path, "rb").read()).hexdigest()
 
 
+def are_hardlinks_supported(path):
+    dummy_file = os.path.join(path, ".dummy.dat")
+    dummy_link = f"{dummy_file}.link"
+    try:
+        with open(dummy_file, "w") as f:
+            f.write("TEST")
+        os.link(dummy_file, dummy_link)
+        hardlinks_supported = True
+    except (RuntimeError, PermissionError):
+        hardlinks_supported = False
+    finally:
+        if os.path.exists(dummy_link):
+            os.unlink(dummy_link)
+        if os.path.exists(dummy_file):
+            os.unlink(dummy_file)
+    return hardlinks_supported
+
+
 def hardlink_select_files(project_path, dry_run):
     raw_dir = os.path.join(project_path, PROJECT_RAW_SUBDIR)
     if os.path.isdir(raw_dir):
@@ -147,17 +165,31 @@ def cleanup_project(
 def cleanup_photo_library(
     library_path, remove_dotfiles, remove_edits, hardlink_selects, dry_run
 ):
+    if hardlink_select_files:
+        if are_hardlinks_supported(library_path):
+            can_use_hardlinks = True
+            hardlinks_description = f"{True}"
+        else:
+            can_use_hardlinks = False
+            hardlinks_description = "Filesystem does not support hardlinks"
+    else:
+        can_use_hardlinks = False
+        hardlinks_description = f"{False}"
     print(f"Library          : {library_path}")
     print(f"Remove ._*       : {remove_dotfiles}")
     print(f"Remove edits     : {remove_edits}")
-    print(f"Hardlink selects : {hardlink_selects}")
+    print(f"Hardlink selects : {hardlinks_description}")
     if dry_run:
         print("(dry run)")
     print("---------------")
 
     for project_dir in find_projects(library_path):
         cleanup_project(
-            project_dir, remove_dotfiles, remove_edits, hardlink_selects, dry_run
+            project_dir,
+            remove_dotfiles,
+            remove_edits,
+            hardlink_selects and can_use_hardlinks,
+            dry_run,
         )
 
 
