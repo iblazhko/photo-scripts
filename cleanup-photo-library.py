@@ -59,7 +59,11 @@ PROJECT_EXPORT_SUBDIR = "2_EXPORT"
 INDENT = "    "
 
 
-def find_projects(library_path):
+class ApplicationError(Exception):
+    pass
+
+
+def find_projects(library_path: str) -> list[str]:
     result = []
     subdirs = [x for x in os.scandir(library_path) if x.is_dir()]
     if any(
@@ -75,14 +79,14 @@ def find_projects(library_path):
     return result
 
 
-def remove_dot_files(project_path, dry_run):
+def remove_dot_files(project_path: str, dry_run: bool):
     for f in glob.glob(f"{project_path}/**/._*", recursive=True):
         print(f"{INDENT}Removing {f}")
         if not dry_run:
             Path.unlink(f)
 
 
-def remove_edit_files(project_path, dry_run):
+def remove_edit_files(project_path: str, dry_run: bool):
     export_dir = os.path.join(project_path, PROJECT_EDIT_SUBDIR)
     if os.path.isdir(export_dir):
         for x in os.scandir(export_dir):
@@ -96,15 +100,15 @@ def remove_edit_files(project_path, dry_run):
                     shutil.rmtree(x.path)
 
 
-def get_file_md5_hash(file_path):
+def get_file_md5_hash(file_path: str) -> str:
     return hashlib.md5(open(file_path, "rb").read()).hexdigest()
 
 
-def are_hardlinks_supported(path):
+def are_hardlinks_supported(path: str) -> bool:
     dummy_file = os.path.join(path, ".dummy.dat")
     dummy_link = f"{dummy_file}.link"
     try:
-        with open(dummy_file, "w") as f:
+        with open(dummy_file, "w", encoding="utf-8") as f:
             f.write("TEST")
         os.link(dummy_file, dummy_link)
         hardlinks_supported = True
@@ -118,7 +122,7 @@ def are_hardlinks_supported(path):
     return hardlinks_supported
 
 
-def hardlink_select_files(project_path, dry_run):
+def hardlink_select_files(project_path: str, dry_run: bool):
     raw_dir = os.path.join(project_path, PROJECT_RAW_SUBDIR)
     if os.path.isdir(raw_dir):
         select_files = [
@@ -150,7 +154,11 @@ def hardlink_select_files(project_path, dry_run):
 
 
 def cleanup_project(
-    project_path, remove_dotfiles, remove_edits, hardlink_selects, dry_run
+    project_path: str,
+    remove_dotfiles: bool,
+    remove_edits: bool,
+    hardlink_selects: bool,
+    dry_run: bool,
 ):
     print(f'Cleaning "{project_path}":')
     if remove_dotfiles:
@@ -163,9 +171,13 @@ def cleanup_project(
 
 
 def cleanup_photo_library(
-    library_path, remove_dotfiles, remove_edits, hardlink_selects, dry_run
+    library_path: str,
+    remove_dotfiles: bool,
+    remove_edits: bool,
+    hardlink_selects: bool,
+    dry_run: bool,
 ):
-    if hardlink_select_files:
+    if hardlink_selects:
         if are_hardlinks_supported(library_path):
             can_use_hardlinks = True
             hardlinks_description = f"{True}"
@@ -175,6 +187,7 @@ def cleanup_photo_library(
     else:
         can_use_hardlinks = False
         hardlinks_description = f"{False}"
+
     print(f"Library          : {library_path}")
     print(f"Remove ._*       : {remove_dotfiles}")
     print(f"Remove edits     : {remove_edits}")
@@ -228,7 +241,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if not os.path.isdir(args.library):
-        raise Exception(f'Photo library directory not found: "{args.library}"')
+        raise ApplicationError(f'Photo library directory not found: "{args.library}"')
 
     cleanup_photo_library(
         args.library,

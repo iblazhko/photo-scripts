@@ -67,8 +67,8 @@ exiv2_datetime_re = re.compile(
 )
 
 
-def empty(x):
-    return len(x) == 0
+class ApplicationError(Exception):
+    pass
 
 
 def get_raw_path():
@@ -76,7 +76,7 @@ def get_raw_path():
 
     raw_dir = os.path.join(project_dir, "0_RAW")
     if not os.path.isdir(raw_dir):
-        raise Exception(f'Raw images directory not found: "{raw_dir}"')
+        raise ApplicationError(f'Raw images directory not found: "{raw_dir}"')
 
     return raw_dir
 
@@ -87,8 +87,8 @@ def get_raw_files(raw_dir: str):
         for f in glob.glob(os.path.join(raw_dir, "*.*"))
     ]
 
-    if empty(files):
-        raise Exception(f'No files found in "{raw_dir}"')
+    if not any(files):
+        raise ApplicationError(f'No files found in "{raw_dir}"')
 
     return sorted(files, key=lambda x: f"{x[0]}.{x[1]}")
 
@@ -96,7 +96,9 @@ def get_raw_files(raw_dir: str):
 def construct_new_raw_filename(raw_dir: str, raw_file: str, ext: str):
     camera_number = raw_file[-4:]
     if not camera_number:
-        raise Exception(f'Could not extract camera number: "{raw_dir}/{raw_file}{ext}"')
+        raise ApplicationError(
+            f'Could not extract camera number: "{raw_dir}/{raw_file}{ext}"'
+        )
 
     raw_file_path = os.path.join(raw_dir, f"{raw_file}{ext}")
 
@@ -113,11 +115,11 @@ def construct_new_raw_filename(raw_dir: str, raw_file: str, ext: str):
     exiv2_output = exiv2_proc.communicate()[0].decode("utf-8")
 
     if not exiv2_output:
-        raise Exception(f'Could not extract EXIF timestamp: "{raw_file_path}"')
+        raise ApplicationError(f'Could not extract EXIF timestamp: "{raw_file_path}"')
 
     match = exiv2_datetime_re.match(exiv2_output)
     if not match:
-        raise Exception(f'Could not extract EXIF timestamp: "{raw_file_path}"')
+        raise ApplicationError(f'Could not extract EXIF timestamp: "{raw_file_path}"')
 
     timestamp_year = match.group("year")
     timestamp_month = match.group("month")
@@ -132,7 +134,7 @@ def construct_new_raw_filename(raw_dir: str, raw_file: str, ext: str):
         and timestamp_hour
         and timestamp_minute
     ):
-        raise Exception(f'Could not extract EXIF timestamp: "{raw_file_path}"')
+        raise ApplicationError(f'Could not extract EXIF timestamp: "{raw_file_path}"')
 
     new_name = f"{timestamp_year}{timestamp_month}{timestamp_day}_{timestamp_hour}{timestamp_minute}_{camera_number}"
 
@@ -157,7 +159,7 @@ def rename_all_raw_files():
     print("=" * 65)
 
     raw_files = get_raw_files(raw_dir)
-    if empty(raw_files):
+    if not any(raw_files):
         print(f'No files found in "{raw_dir}"')
     else:
         for f, e in raw_files:

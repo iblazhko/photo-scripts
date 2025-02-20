@@ -109,6 +109,14 @@ EXIF_TAGS = [
 ]
 
 
+class ArgumentError(Exception):
+    pass
+
+
+class ApplicationError(Exception):
+    pass
+
+
 @dataclass
 class ProjectLocations:
     project_dir: str
@@ -163,15 +171,11 @@ class ExportOptions:
     metadata: MetadataOptions
 
 
-def empty(x):
-    return len(x) == 0
-
-
 def pluralize(word, count):
     return word if count == 1 else f"{word}s"
 
 
-def get_border_options(size):
+def get_border_options(size: str) -> BorderOptions:
     match size:
         case "large":
             return BorderOptions(
@@ -205,9 +209,11 @@ def get_border_options(size):
             )
         case "none":
             return None
+        case _:
+            raise ArgumentError(f"Border option '{size}' is not supported")
 
 
-def get_resize_options(size, border):
+def get_resize_options(size: str, border: BorderOptions) -> ResizeOptions:
     match size:
         case "large":
             return ResizeOptions(
@@ -231,14 +237,14 @@ def get_resize_options(size, border):
                 95,
             )
         case _:
-            raise Exception(f"Size {size} is not supported")
+            raise ArgumentError(f"Resize option '{size}' is not supported")
 
 
-def get_metadata_options(overrides_rules_file):
+def get_metadata_options(overrides_rules_file: str):
     return MetadataOptions(overrides_rules_file if overrides_rules_file else None)
 
 
-def map_exif_tag_from_json(tag_json):
+def map_exif_tag_from_json(tag_json: object) -> ExifTag:
     return ExifTag(
         tag_json["tag"],
         tag_json["value"],
@@ -246,7 +252,7 @@ def map_exif_tag_from_json(tag_json):
     )
 
 
-def map_exif_override_rule_from_json(rule_json):
+def map_exif_override_rule_from_json(rule_json: object) -> MetadataOverrideRule:
     return MetadataOverrideRule(
         (
             map_exif_tag_from_json(rule_json["pattern"])
@@ -257,15 +263,15 @@ def map_exif_override_rule_from_json(rule_json):
     )
 
 
-def get_metadata_override_rules(rules_file):
-    if rules_file:
+def get_metadata_override_rules(rules_file: str) -> list[MetadataOverrideRule]:
+    if os.path.isfile(rules_file):
         rules_json = json.loads(Path(rules_file).read_text())
         return [map_exif_override_rule_from_json(x) for x in rules_json["rules"]]
     else:
         return []
 
 
-def rule_match(exif_tags, rule):
+def rule_match(exif_tags: list[str], rule: MetadataOverrideRule) -> bool:
     if rule.pattern:
         k = rule.pattern.key.replace(".", "\\.")
         v = rule.pattern.value
@@ -275,7 +281,7 @@ def rule_match(exif_tags, rule):
         return True
 
 
-def append_metadata_overrides(exif_tags, metadata_options):
+def append_metadata_overrides(exif_tags: list[str], metadata_options: MetadataOptions):
     rules = get_metadata_override_rules(metadata_options.overrides_file)
     if rules:
         new_tags = copy.deepcopy(exif_tags)
@@ -288,7 +294,7 @@ def append_metadata_overrides(exif_tags, metadata_options):
         return exif_tags
 
 
-def get_project_locations():
+def get_project_locations() -> ProjectLocations:
     project_dir = os.getcwd()
 
     raw_dir = os.path.join(project_dir, "0_RAW")
@@ -296,30 +302,34 @@ def get_project_locations():
     export_dir = os.path.join(project_dir, "2_EXPORT")
 
     if not os.path.isdir(raw_dir):
-        raise Exception(f'Raw images directory not found: "{raw_dir}"')
+        raise ApplicationError(f'Raw images directory not found: "{raw_dir}"')
 
     if not os.path.isdir(edit_dir):
-        raise Exception(f'Edited images directory not found: "{edit_dir}"')
+        raise ApplicationError(f'Edited images directory not found: "{edit_dir}"')
 
     if not os.path.isdir(export_dir):
         os.mkdir(export_dir)
         if not os.path.isdir(export_dir):
-            raise Exception(f'Exported images directory not found: "{export_dir}"')
+            raise ApplicationError(
+                f'Exported images directory not found: "{export_dir}"'
+            )
 
     return ProjectLocations(project_dir, raw_dir, edit_dir, export_dir)
 
 
-def get_edited_files(edit_dir):
+def get_edited_files(edit_dir: str) -> list[str]:
     edits_glob = os.path.join(edit_dir, f"*.{EDIT_FORMAT}")
     files = [pathlib.Path(f).stem for f in glob.glob(edits_glob)]
 
-    if empty(files):
-        raise Exception(f'No "{edits_glob}" files found')
+    if not any(files):
+        raise ApplicationError(f'No "{edits_glob}" files found')
 
     return files
 
 
-def convert_tiff_to_jpeg(file, locations, resize_options):
+def convert_tiff_to_jpeg(
+    file: str, locations: ProjectLocations, resize_options: ResizeOptions
+):
     target_normalized_name = file.removesuffix("-Enhanced-NR")
 
     source_file = os.path.join(locations.edit_dir, f"{file}.{EDIT_FORMAT}")
@@ -359,7 +369,9 @@ def convert_tiff_to_jpeg(file, locations, resize_options):
     subprocess.run(magick)
 
 
-def copy_metadata(file, locations, metadata_options):
+def copy_metadata(
+    file: str, locations: ProjectLocations, metadata_options: MetadataOptions
+):
     source_normalized_name = file.removesuffix("-BW").removesuffix("-Enhanced-NR")
     target_normalized_name = file.removesuffix("-Enhanced-NR")
 
@@ -375,16 +387,18 @@ def copy_metadata(file, locations, metadata_options):
         pattern = f"{source_normalized_name}*.*"
         raw_file_glob = os.path.join(locations.raw_dir, pattern)
         matching_raw_files = glob.glob(raw_file_glob)
-        if empty(matching_raw_files):
+        if not any(matching_raw_files):
             raw_file_glob = os.path.join(locations.project_dir, pattern)
             matching_raw_files = glob.glob(raw_file_glob)
-            if empty(matching_raw_files):
-                raise Exception(f'No "{pattern}" files found to copy metadata from')
+            if not any(matching_raw_files):
+                raise ApplicationError(
+                    f'No "{pattern}" files found to copy metadata from'
+                )
         source_file = matching_raw_files[0]
 
     exiv2_cleanup_process = subprocess.run(["exiv2", "rm", target_file])
     if exiv2_cleanup_process.returncode != 0:
-        raise Exception(f"Could not clean metadata for {target_file}")
+        raise ApplicationError(f"Could not clean metadata for {target_file}")
 
     exiv2_tags_options = []
     for x in EXIF_TAGS:
@@ -394,7 +408,7 @@ def copy_metadata(file, locations, metadata_options):
         exiv2_export, capture_output=True, encoding="utf-8"
     )
     if exiv2_export_process.returncode != 0:
-        raise Exception(f"Could not get metadata from {source_file}")
+        raise ApplicationError(f"Could not get metadata from {source_file}")
 
     # '.strip()' is a workaround for https://github.com/Exiv2/exiv2/issues/2836
     exif_tags = append_metadata_overrides(
@@ -407,10 +421,14 @@ def copy_metadata(file, locations, metadata_options):
         exiv2_import, input=exiv2_import_input, text=True
     )
     if exiv2_import_process.returncode != 0:
-        raise Exception(f"Could not set metadata for {target_file}")
+        raise ApplicationError(f"Could not set metadata for {target_file}")
 
 
-def process_for_sharing(locations, resize_options, metadata_options):
+def process_for_sharing(
+    locations: ProjectLocations,
+    resize_options: ResizeOptions,
+    metadata_options: MetadataOptions,
+):
     if not metadata_options.overrides_file:
         default_exif_json = str(Path.home() / "Pictures" / "Library" / "exif.json")
         if os.path.isfile(default_exif_json):
