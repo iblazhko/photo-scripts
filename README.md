@@ -80,7 +80,7 @@ online.
 Usage example:
 
 ```bash
-process-photos-for-export.py --size medium --exif ../exif.json
+process-photos-for-export.py --size medium --border medium --exif ../exif.json
 ```
 
 ### EXIF metadata overrides

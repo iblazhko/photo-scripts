@@ -171,66 +171,63 @@ def pluralize(word, count):
     return word if count == 1 else f"{word}s"
 
 
-def get_resize_options(size, add_border):
+def get_border_options(size):
+    match size:
+        case "large":
+            return BorderOptions(
+                BORDER_COLOR,
+                200,
+                40,
+                [
+                    BorderSeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 2),
+                    BorderSeparatorOptions(BORDER_SEPARATOR_DARK_COLOR, 2),
+                ],
+            )
+        case "medium":
+            return BorderOptions(
+                BORDER_COLOR,
+                36,
+                0,
+                [
+                    BorderSeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 2),
+                    BorderSeparatorOptions(BORDER_SEPARATOR_DARK_COLOR, 2),
+                ],
+            )
+        case "small":
+            return BorderOptions(
+                BORDER_COLOR,
+                2,
+                0,
+                [
+                    BorderSeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
+                    BorderSeparatorOptions(BORDER_SEPARATOR_DARK_COLOR, 1),
+                ],
+            )
+        case "none":
+            return None
+
+
+def get_resize_options(size, border):
     match size:
         case "large":
             return ResizeOptions(
                 4000,
                 3500,
-                (
-                    BorderOptions(
-                        BORDER_COLOR,
-                        100,
-                        20,
-                        [
-                            BorderSeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
-                            BorderSeparatorOptions(BORDER_SEPARATOR_DARK_COLOR, 2),
-                            BorderSeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
-                        ],
-                    )
-                    if add_border
-                    else None
-                ),
+                border,
                 99,
             )
         case "medium":
             return ResizeOptions(
                 2000,
                 1500,
-                (
-                    BorderOptions(
-                        BORDER_COLOR,
-                        40,
-                        10,
-                        [
-                            BorderSeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
-                            BorderSeparatorOptions(BORDER_SEPARATOR_DARK_COLOR, 1),
-                            BorderSeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
-                        ],
-                    )
-                    if add_border
-                    else None
-                ),
+                border,
                 97,
             )
         case "small":
             return ResizeOptions(
                 900,
                 800,
-                (
-                    BorderOptions(
-                        BORDER_COLOR,
-                        20,
-                        5,
-                        [
-                            BorderSeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
-                            BorderSeparatorOptions(BORDER_SEPARATOR_DARK_COLOR, 1),
-                            BorderSeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 1),
-                        ],
-                    )
-                    if add_border
-                    else None
-                ),
+                border,
                 95,
             )
         case _:
@@ -414,6 +411,11 @@ def copy_metadata(file, locations, metadata_options):
 
 
 def process_for_sharing(locations, resize_options, metadata_options):
+    if not metadata_options.overrides_file:
+        default_exif_json = str(Path.home() / "Pictures" / "Library" / "exif.json")
+        if os.path.isfile(default_exif_json):
+            metadata_options.overrides_file = default_exif_json
+
     print(f'PROJECT        : "{locations.project_dir}"')
     print(f'RAW            : "{locations.raw_dir}"')
     print(f'EDIT           : "{locations.edit_dir}"')
@@ -422,7 +424,9 @@ def process_for_sharing(locations, resize_options, metadata_options):
     print(
         f"Size           : {resize_options.image_width}x{resize_options.image_height}"
     )
-    print(f"Border         : {'True' if resize_options.border else 'False'}")
+    print(
+        f"Border         : {resize_options.border.size if resize_options.border else 'None'}"
+    )
     print(
         f"EXIF overrides : {metadata_options.overrides_file if metadata_options.overrides_file else 'None'}"
     )
@@ -449,17 +453,18 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--border",
-        type=bool,
-        help="add border",
-        action=argparse.BooleanOptionalAction,
-        default=True,
+        type=str,
+        choices=["large", "medium", "small", "none"],
+        help="border size",
+        default="medium",
     )
     parser.add_argument("--exif", type=str, help="EXIF override rules file")
 
     args = parser.parse_args()
 
     locations = get_project_locations()
-    resize_options = get_resize_options(args.size, args.border)
+    border_options = get_border_options(args.border)
+    resize_options = get_resize_options(args.size, border_options)
     metadata_options = get_metadata_options(args.exif)
 
     process_for_sharing(locations, resize_options, metadata_options)
