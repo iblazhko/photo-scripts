@@ -328,7 +328,7 @@ def get_edited_files(edit_dir: str) -> list[str]:
 
 
 def convert_tiff_to_jpeg(
-    file: str, locations: ProjectLocations, resize_options: ResizeOptions
+    file: str, locations: ProjectLocations, resize_options: ResizeOptions, verbose: bool
 ):
     target_normalized_name = file.removesuffix("-Enhanced-NR")
 
@@ -366,11 +366,17 @@ def convert_tiff_to_jpeg(
             ]
     # fmt: on
 
+    if verbose:
+        print()
+        print(" ".join(magick))
     subprocess.run(magick)
 
 
 def copy_metadata(
-    file: str, locations: ProjectLocations, metadata_options: MetadataOptions
+    file: str,
+    locations: ProjectLocations,
+    metadata_options: MetadataOptions,
+    verbose: bool,
 ):
     source_normalized_name = file.removesuffix("-BW").removesuffix("-Enhanced-NR")
     target_normalized_name = file.removesuffix("-Enhanced-NR")
@@ -396,7 +402,12 @@ def copy_metadata(
                 )
         source_file = matching_raw_files[0]
 
-    exiv2_cleanup_process = subprocess.run(["exiv2", "rm", target_file])
+    exiv2_cleanup = ["exiv2", "rm", target_file]
+
+    if verbose:
+        print()
+        print(" ".join(exiv2_cleanup))
+    exiv2_cleanup_process = subprocess.run(exiv2_cleanup)
     if exiv2_cleanup_process.returncode != 0:
         raise ApplicationError(f"Could not clean metadata for {target_file}")
 
@@ -404,6 +415,10 @@ def copy_metadata(
     for x in EXIF_TAGS:
         exiv2_tags_options.extend(["-K", x])
     exiv2_export = ["exiv2", "-PVk"] + exiv2_tags_options + [source_file]
+
+    if verbose:
+        print()
+        print(" ".join(exiv2_export))
     exiv2_export_process = subprocess.run(
         exiv2_export, capture_output=True, encoding="utf-8"
     )
@@ -416,6 +431,12 @@ def copy_metadata(
     )
 
     exiv2_import_input = os.linesep.join(exif_tags)
+
+    if verbose:
+        print()
+        print(f"exiv2 -m- {target_file} <<EOF")
+        print(exiv2_import_input)
+        print("EOF")
     exiv2_import = ["exiv2", "-m-", target_file]
     exiv2_import_process = subprocess.run(
         exiv2_import, input=exiv2_import_input, text=True
@@ -428,6 +449,7 @@ def process_for_sharing(
     locations: ProjectLocations,
     resize_options: ResizeOptions,
     metadata_options: MetadataOptions,
+    verbose: bool,
 ):
     if not metadata_options.overrides_file:
         default_exif_json = str(Path.home() / "Pictures" / "Library" / "exif.json")
@@ -453,10 +475,16 @@ def process_for_sharing(
     tiff_files = sorted(get_edited_files(locations.edit_dir))
 
     for f in tiff_files:
+        if verbose:
+            print("---")
         print(f)
-        convert_tiff_to_jpeg(f, locations, resize_options)
-        copy_metadata(f, locations, metadata_options)
+        convert_tiff_to_jpeg(f, locations, resize_options, verbose)
+        copy_metadata(f, locations, metadata_options, verbose)
+        if verbose:
+            print()
     count = len(tiff_files)
+    if verbose and count > 0:
+        print("---")
     print(f'Done ({count} {pluralize("file", count)})')
 
 
@@ -477,6 +505,11 @@ if __name__ == "__main__":
         default="medium",
     )
     parser.add_argument("--exif", type=str, help="EXIF override rules file")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="print commands to be executed",
+    )
 
     args = parser.parse_args()
 
@@ -485,4 +518,4 @@ if __name__ == "__main__":
     resize_options = get_resize_options(args.size, border_options)
     metadata_options = get_metadata_options(args.exif)
 
-    process_for_sharing(locations, resize_options, metadata_options)
+    process_for_sharing(locations, resize_options, metadata_options, args.verbose)
