@@ -15,7 +15,7 @@ Assuming following library structure:
 
 This script will:
 * remove edits from `YYYY-MM-DD <Description>/1_EDIT` - these files can
-  always be re-exported from editind application
+  always be re-exported from editing application
 * use hard links for RAW selects in `YYYY-MM-DD <Description>`
   (link them to corresponding files in `YYYY-MM-DD <Description>/0_RAW`)
   to save disk space.
@@ -112,7 +112,11 @@ def are_hardlinks_supported(path: str) -> bool:
             f.write("TEST")
         os.link(dummy_file, dummy_link)
         hardlinks_supported = True
-    except (RuntimeError, PermissionError):
+    except (
+        OSError,
+        PermissionError,
+        RuntimeError,
+    ):
         hardlinks_supported = False
     finally:
         if os.path.exists(dummy_link):
