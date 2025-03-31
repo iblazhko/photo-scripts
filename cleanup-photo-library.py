@@ -81,7 +81,7 @@ def find_projects(library_path: str) -> list[str]:
 
 def remove_dot_files(project_path: str, dry_run: bool):
     for f in glob.glob(f"{project_path}/**/._*", recursive=True):
-        print(f"{INDENT}Removing {f}")
+        print(f"{INDENT}❌ {f}")
         if not dry_run:
             Path.unlink(f)
 
@@ -91,11 +91,11 @@ def remove_edit_files(project_path: str, dry_run: bool):
     if os.path.isdir(export_dir):
         for x in os.scandir(export_dir):
             if x.is_file():
-                print(f"{INDENT}Removing {x.path}")
+                print(f"{INDENT}❌ {x.path}")
                 if not dry_run:
                     Path.unlink(x.path)
             elif x.is_dir():
-                print(f"{INDENT}Removing {x.path}/")
+                print(f"{INDENT}❌ {x.path}/")
                 if not dry_run:
                     shutil.rmtree(x.path)
 
@@ -146,14 +146,14 @@ def hardlink_select_files(project_path: str, dry_run: bool):
                 raw_md5 = get_file_md5_hash(raw_candidate)
                 if select_md5 == raw_md5:
                     print(
-                        f"{INDENT}Linking {select_path} <- {PROJECT_RAW_SUBDIR}/{file_name}"
+                        f"{INDENT}🔗 {select_path} <- {PROJECT_RAW_SUBDIR}/{file_name}"
                     )
                     if not dry_run:
                         Path.unlink(select_path)
                         os.link(raw_candidate, select_path)
                 else:
                     print(
-                        f"{INDENT}WARNING: {x.path} content (MD5:{select_md5}) is different from {PROJECT_RAW_SUBDIR}/{x.name} (MD5:{raw_md5})"
+                        f"{INDENT}⚠️ {x.path} content (MD5:{select_md5}) is different from {PROJECT_RAW_SUBDIR}/{x.name} (MD5:{raw_md5})"
                     )
 
 
@@ -164,7 +164,7 @@ def cleanup_project(
     hardlink_selects: bool,
     dry_run: bool,
 ):
-    print(f'Cleaning "{project_path}":')
+    print(f"{project_path}:")
     if remove_dotfiles:
         remove_dot_files(project_path, dry_run)
     if remove_edits:
@@ -187,7 +187,7 @@ def cleanup_photo_library(
             hardlinks_description = f"{True}"
         else:
             can_use_hardlinks = False
-            hardlinks_description = "Filesystem does not support hardlinks"
+            hardlinks_description = "⚠️ Filesystem does not support hardlinks"
     else:
         can_use_hardlinks = False
         hardlinks_description = f"{False}"
@@ -237,7 +237,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dry_run",
         type=bool,
-        help="print actions to be performed, bu do not remove or modify any files",
+        help="print actions to be performed, but do not remove or modify any files",
         action=argparse.BooleanOptionalAction,
         default=False,
     )
