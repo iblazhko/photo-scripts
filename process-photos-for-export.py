@@ -141,8 +141,8 @@ class BorderOptions:
 
 @dataclass
 class ResizeOptions:
-    image_width: str
-    image_height: str
+    image_width: int
+    image_height: int
     border: BorderOptions
     quality: int
 

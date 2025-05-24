@@ -51,7 +51,6 @@ import hashlib
 import glob
 import os
 import shutil
-from pathlib import Path
 
 PROJECT_RAW_SUBDIR = "0_RAW"
 PROJECT_EDIT_SUBDIR = "1_EDIT"
@@ -83,7 +82,7 @@ def remove_dot_files(project_path: str, dry_run: bool):
     for f in glob.glob(f"{project_path}/**/._*", recursive=True):
         print(f"{INDENT}❌ {f}")
         if not dry_run:
-            Path.unlink(f)
+            os.unlink(f)
 
 
 def remove_edit_files(project_path: str, dry_run: bool):
@@ -93,7 +92,7 @@ def remove_edit_files(project_path: str, dry_run: bool):
             if x.is_file():
                 print(f"{INDENT}❌ {x.path}")
                 if not dry_run:
-                    Path.unlink(x.path)
+                    os.unlink(x.path)
             elif x.is_dir():
                 print(f"{INDENT}❌ {x.path}/")
                 if not dry_run:
@@ -149,7 +148,7 @@ def hardlink_select_files(project_path: str, dry_run: bool):
                         f"{INDENT}🔗 {select_path} <- {PROJECT_RAW_SUBDIR}/{file_name}"
                     )
                     if not dry_run:
-                        Path.unlink(select_path)
+                        os.unlink(select_path)
                         os.link(raw_candidate, select_path)
                 else:
                     print(
@@ -157,11 +156,54 @@ def hardlink_select_files(project_path: str, dry_run: bool):
                     )
 
 
+def set_file_mode(path: str, mode: int, display_path: str, dry_run: bool):
+    print(f"{INDENT}✔️ {oct(mode)} {display_path}")
+    if not dry_run:
+        os.chmod(path, mode)
+
+
+def set_file_readonly(path: str, display_path: str, dry_run: bool):
+    mode = os.stat(path).st_mode
+    if mode & 0o000333 :
+        new_mode = mode & 0o777444
+        set_file_mode(path, new_mode, display_path, dry_run)
+
+
+def set_file_readwrite(path: str, display_path: str, dry_run: bool):
+    mode = os.stat(path).st_mode
+    if (mode & 0o000111) or ((mode & 0o000666) != 0o000666):
+        new_mode = (mode & 0o777666) | 0o000666
+        set_file_mode(path, new_mode, display_path, dry_run)
+
+
+def set_files_permissions(project_path: str, hardlink_selects: bool, dry_run: bool):
+    raw_path_set = set()
+
+    raw_dir = os.path.join(project_path, PROJECT_RAW_SUBDIR)
+    if os.path.exists(raw_dir):
+        raw_files = [x for x in os.scandir(raw_dir) if x.is_file()]
+        for x in raw_files:
+            set_file_readonly(x.path, f"{PROJECT_RAW_SUBDIR}/{x.name}", dry_run)
+            raw_path_set.add(x.path)
+
+    project_root_files = [x for x in os.scandir(project_path) if x.is_file()]
+    for x in project_root_files:
+        if hardlink_selects and (x.path in raw_path_set):
+            continue
+        else:
+            _, file_extension = os.path.splitext(x.path)
+            if file_extension.lower() == '.xmp':
+                set_file_readwrite(x.path, x.name, dry_run)
+            else:
+                set_file_readonly(x.path, x.name, dry_run)
+
+
 def cleanup_project(
     project_path: str,
     remove_dotfiles: bool,
     remove_edits: bool,
     hardlink_selects: bool,
+    fix_permissions: bool,
     dry_run: bool,
 ):
     print(f"{project_path}:")
@@ -171,6 +213,8 @@ def cleanup_project(
         remove_edit_files(project_path, dry_run)
     if hardlink_selects:
         hardlink_select_files(project_path, dry_run)
+    if fix_permissions:
+        set_files_permissions(project_path, hardlink_selects, dry_run)
     print()
 
 
@@ -179,6 +223,7 @@ def cleanup_photo_library(
     remove_dotfiles: bool,
     remove_edits: bool,
     hardlink_selects: bool,
+    fix_permissions: bool,
     dry_run: bool,
 ):
     if hardlink_selects:
@@ -196,6 +241,7 @@ def cleanup_photo_library(
     print(f"Remove ._*       : {remove_dotfiles}")
     print(f"Remove edits     : {remove_edits}")
     print(f"Hardlink selects : {hardlinks_description}")
+    print(f"Fix permissions  : {fix_permissions}")
     if dry_run:
         print("(dry run)")
     print("---------------")
@@ -206,6 +252,7 @@ def cleanup_photo_library(
             remove_dotfiles,
             remove_edits,
             hardlink_selects and can_use_hardlinks,
+            fix_permissions,
             dry_run,
         )
 
@@ -235,6 +282,13 @@ if __name__ == "__main__":
         default=True,
     )
     parser.add_argument(
+        "--fix_permissions",
+        type=bool,
+        help="remove executable flag and make raw files read-only",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
         "--dry_run",
         type=bool,
         help="print actions to be performed, but do not remove or modify any files",
@@ -252,5 +306,6 @@ if __name__ == "__main__":
         args.remove_dotfiles,
         args.remove_edits,
         args.hardlink_selects,
+        args.fix_permissions,
         args.dry_run,
     )
