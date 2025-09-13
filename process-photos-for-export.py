@@ -190,7 +190,7 @@ def get_border_options(size: str) -> BorderOptions:
         case "medium":
             return BorderOptions(
                 BORDER_COLOR,
-                36,
+                46,
                 0,
                 [
                     BorderSeparatorOptions(BORDER_SEPARATOR_LIGHT_COLOR, 2),
