@@ -13,9 +13,11 @@ Assuming following library structure:
             yyyymmdd_hhmm_nnnn.raw
             yyyymmdd_hhmm_nnnn.raw -- raw files selected for edit; copied from 0_RAW
 
-This script will:
+This script can perfom following cleanups:
 * remove edits from `YYYY-MM-DD <Description>/1_EDIT` - these files can
   always be re-exported from editing application
+* remove images from `YYYY-MM-DD <Description>/2_EXPORT` - can be useful
+  if files have been copied already elsewhere, e.g. to an online gallery
 * use hard links for RAW selects in `YYYY-MM-DD <Description>`
   (link them to corresponding files in `YYYY-MM-DD <Description>/0_RAW`)
   to save disk space.
@@ -61,6 +63,11 @@ INDENT = "    "
 class ApplicationError(Exception):
     pass
 
+def get_dry_run_info(dry_run: bool):
+    if dry_run:
+        return "ℹ️"
+    else:
+        return ""
 
 def find_projects(library_path: str) -> list[str]:
     result = []
@@ -79,22 +86,24 @@ def find_projects(library_path: str) -> list[str]:
 
 
 def remove_dot_files(project_path: str, dry_run: bool):
+    dry_run_info = get_dry_run_info(dry_run)
     for f in glob.glob(f"{project_path}/**/._*", recursive=True):
-        print(f"{INDENT}❌ {f}")
+        print(f"{dry_run_info}{INDENT}❌ {f}")
         if not dry_run:
             os.unlink(f)
 
 
-def remove_edit_files(project_path: str, dry_run: bool):
-    export_dir = os.path.join(project_path, PROJECT_EDIT_SUBDIR)
+def remove_subdir_files(project_path: str, subdir: str, dry_run: bool):
+    dry_run_info = get_dry_run_info(dry_run)
+    export_dir = os.path.join(project_path, subdir)
     if os.path.isdir(export_dir):
         for x in os.scandir(export_dir):
             if x.is_file():
-                print(f"{INDENT}❌ {x.path}")
+                print(f"{dry_run_info}{INDENT}❌ {x.path}")
                 if not dry_run:
                     os.unlink(x.path)
             elif x.is_dir():
-                print(f"{INDENT}❌ {x.path}/")
+                print(f"{dry_run_info}{INDENT}❌ {x.path}/")
                 if not dry_run:
                     shutil.rmtree(x.path)
 
@@ -126,6 +135,7 @@ def are_hardlinks_supported(path: str) -> bool:
 
 
 def hardlink_select_files(project_path: str, dry_run: bool):
+    dry_run_info = get_dry_run_info(dry_run)
     raw_dir = os.path.join(project_path, PROJECT_RAW_SUBDIR)
     if os.path.isdir(raw_dir):
         select_files = [
@@ -145,19 +155,20 @@ def hardlink_select_files(project_path: str, dry_run: bool):
                 raw_md5 = get_file_md5_hash(raw_candidate)
                 if select_md5 == raw_md5:
                     print(
-                        f"{INDENT}🔗 {select_path} <- {PROJECT_RAW_SUBDIR}/{file_name}"
+                        f"{dry_run_info}{INDENT}🔗 {select_path} <- {PROJECT_RAW_SUBDIR}/{file_name}"
                     )
                     if not dry_run:
                         os.unlink(select_path)
                         os.link(raw_candidate, select_path)
                 else:
                     print(
-                        f"{INDENT}⚠️ {x.path} content (MD5:{select_md5}) is different from {PROJECT_RAW_SUBDIR}/{x.name} (MD5:{raw_md5})"
+                        f"{dry_run_info}{INDENT}⚠️ {x.path} content (MD5:{select_md5}) is different from {PROJECT_RAW_SUBDIR}/{x.name} (MD5:{raw_md5})"
                     )
 
 
 def set_file_mode(path: str, mode: int, display_path: str, dry_run: bool):
-    print(f"{INDENT}✔️ {oct(mode)} {display_path}")
+    dry_run_info = get_dry_run_info(dry_run)
+    print(f"{dry_run_info}{INDENT}✔️ {oct(mode)} {display_path}")
     if not dry_run:
         os.chmod(path, mode)
 
@@ -202,6 +213,7 @@ def cleanup_project(
     project_path: str,
     remove_dotfiles: bool,
     remove_edits: bool,
+    remove_exports: bool,
     hardlink_selects: bool,
     fix_permissions: bool,
     dry_run: bool,
@@ -210,7 +222,9 @@ def cleanup_project(
     if remove_dotfiles:
         remove_dot_files(project_path, dry_run)
     if remove_edits:
-        remove_edit_files(project_path, dry_run)
+        remove_subdir_files(project_path, PROJECT_EDIT_SUBDIR, dry_run)
+    if remove_exports:
+        remove_subdir_files(project_path, PROJECT_EXPORT_SUBDIR, dry_run)
     if hardlink_selects:
         hardlink_select_files(project_path, dry_run)
     if fix_permissions:
@@ -222,6 +236,7 @@ def cleanup_photo_library(
     library_path: str,
     remove_dotfiles: bool,
     remove_edits: bool,
+    remove_exports: bool,
     hardlink_selects: bool,
     fix_permissions: bool,
     dry_run: bool,
@@ -240,6 +255,7 @@ def cleanup_photo_library(
     print(f"Library          : {library_path}")
     print(f"Remove ._*       : {remove_dotfiles}")
     print(f"Remove edits     : {remove_edits}")
+    print(f"Remove exports   : {remove_exports}")
     print(f"Hardlink selects : {hardlinks_description}")
     print(f"Fix permissions  : {fix_permissions}")
     if dry_run:
@@ -251,6 +267,7 @@ def cleanup_photo_library(
             project_dir,
             remove_dotfiles,
             remove_edits,
+            remove_exports,
             hardlink_selects and can_use_hardlinks,
             fix_permissions,
             dry_run,
@@ -258,7 +275,7 @@ def cleanup_photo_library(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(prog="cleanup-photos")
+    parser = argparse.ArgumentParser(prog="cleanup-photo-library")
     parser.add_argument("library", type=str, help="photo library path")
     parser.add_argument(
         "--remove_dotfiles",
@@ -273,6 +290,13 @@ if __name__ == "__main__":
         help="remove files from 1_EDIT",
         action=argparse.BooleanOptionalAction,
         default=True,
+    )
+    parser.add_argument(
+        "--remove_exports",
+        type=bool,
+        help="remove files from 2_EXPORT",
+        action=argparse.BooleanOptionalAction,
+        default=False,
     )
     parser.add_argument(
         "--hardlink_selects",
@@ -305,6 +329,7 @@ if __name__ == "__main__":
         args.library,
         args.remove_dotfiles,
         args.remove_edits,
+        args.remove_exports,
         args.hardlink_selects,
         args.fix_permissions,
         args.dry_run,
