@@ -5,10 +5,10 @@
 Assuming following library structure:
     Library/
         YYYY-MM-DD <Description>/
-            0_RAW/     -- raw files copied from camera and renamed using rename-raw-photos.py
+            0_RAW/     -- raw files from camera, renamed with rename-raw-photos.py
                 yyyymmdd_hhmm_nnnn.jpg
                 yyyymmdd_hhmm_nnnn.raw
-            1_EDIT/    -- edits made in Lightroom/Darktable etc.; usually exported from editing app as full-sized TIFFs
+            1_EDIT/    -- edits from Lightroom/Darktable exported as full-sized TIFFs
             2_EXPORT/  -- not used by this script
             yyyymmdd_hhmm_nnnn.raw
             yyyymmdd_hhmm_nnnn.raw -- raw files selected for edit; copied from 0_RAW
@@ -50,74 +50,74 @@ THE SOFTWARE.
 """
 import argparse
 import hashlib
-import glob
 import os
 import shutil
+from pathlib import Path
 
 PROJECT_RAW_SUBDIR = "0_RAW"
 PROJECT_EDIT_SUBDIR = "1_EDIT"
 PROJECT_EXPORT_SUBDIR = "2_EXPORT"
 INDENT = "    "
+FILE_RW_MASK = 0o000666
 
 
 class ApplicationError(Exception):
     pass
 
+
 def get_dry_run_info(dry_run: bool):
     if dry_run:
-        return "ℹ️"
+        return "ℹ️"  # noqa: RUF001
     else:
         return ""
 
-def find_projects(library_path: str) -> list[str]:
+
+def find_projects(library_path: Path) -> list[Path]:
     result = []
-    subdirs = [x for x in os.scandir(library_path) if x.is_dir()]
+    subdirs = [x for x in library_path.iterdir() if x.is_dir()]
     if any(
-        x.name == PROJECT_RAW_SUBDIR
-        or x.name == PROJECT_EDIT_SUBDIR
-        or x.name == PROJECT_EXPORT_SUBDIR
+        x.name in {PROJECT_RAW_SUBDIR, PROJECT_EDIT_SUBDIR, PROJECT_EXPORT_SUBDIR}
         for x in subdirs
     ):
         result.extend([library_path])
     else:
         for x in subdirs:
-            result.extend(find_projects(x.path))
+            result.extend(find_projects(x))
     return result
 
 
-def remove_dot_files(project_path: str, dry_run: bool):
+def remove_dot_files(project_path: Path, dry_run: bool):
     dry_run_info = get_dry_run_info(dry_run)
-    for f in glob.glob(f"{project_path}/**/._*", recursive=True):
+    for f in project_path.rglob("._*"):
         print(f"{dry_run_info}{INDENT}❌ {f}")
         if not dry_run:
-            os.unlink(f)
+            f.unlink()
 
 
-def remove_subdir_files(project_path: str, subdir: str, dry_run: bool):
+def remove_subdir_files(project_path: Path, subdir: str, dry_run: bool):
     dry_run_info = get_dry_run_info(dry_run)
-    export_dir = os.path.join(project_path, subdir)
-    if os.path.isdir(export_dir):
-        for x in os.scandir(export_dir):
+    export_dir = project_path / subdir
+    if export_dir.is_dir():
+        for x in export_dir.iterdir():
             if x.is_file():
-                print(f"{dry_run_info}{INDENT}❌ {x.path}")
+                print(f"{dry_run_info}{INDENT}❌ {x}")
                 if not dry_run:
-                    os.unlink(x.path)
+                    x.unlink()
             elif x.is_dir():
-                print(f"{dry_run_info}{INDENT}❌ {x.path}/")
+                print(f"{dry_run_info}{INDENT}❌ {x}/")
                 if not dry_run:
-                    shutil.rmtree(x.path)
+                    shutil.rmtree(x)
 
 
-def get_file_md5_hash(file_path: str) -> str:
-    return hashlib.md5(open(file_path, "rb").read()).hexdigest()
+def get_file_md5_hash(file_path: Path) -> str:
+    return hashlib.md5(file_path.read_bytes()).hexdigest()
 
 
-def are_hardlinks_supported(path: str) -> bool:
-    dummy_file = os.path.join(path, ".dummy.dat")
-    dummy_link = f"{dummy_file}.link"
+def are_hardlinks_supported(path: Path) -> bool:
+    dummy_file = path / ".dummy.dat"
+    dummy_link = path / ".dummy.dat.link"
     try:
-        with open(dummy_file, "w", encoding="utf-8") as f:
-            f.write("TEST")
+        dummy_file.write_text("TEST", encoding="utf-8")
         os.link(dummy_file, dummy_link)
         hardlinks_supported = True
     except (
@@ -127,90 +127,88 @@ def are_hardlinks_supported(path: str) -> bool:
     ):
         hardlinks_supported = False
     finally:
-        if os.path.exists(dummy_link):
-            os.unlink(dummy_link)
-        if os.path.exists(dummy_file):
-            os.unlink(dummy_file)
+        if dummy_link.exists():
+            dummy_link.unlink()
+        if dummy_file.exists():
+            dummy_file.unlink()
     return hardlinks_supported
 
 
-def hardlink_select_files(project_path: str, dry_run: bool):
+def hardlink_select_files(project_path: Path, dry_run: bool):
     dry_run_info = get_dry_run_info(dry_run)
-    raw_dir = os.path.join(project_path, PROJECT_RAW_SUBDIR)
-    if os.path.isdir(raw_dir):
+    raw_dir = project_path / PROJECT_RAW_SUBDIR
+    if raw_dir.is_dir():
         select_files = [
             x
-            for x in os.scandir(project_path)
+            for x in project_path.iterdir()
             if x.is_file()
             and not (x.name.startswith(".") or x.is_junction() or x.is_symlink())
         ]
         for x in select_files:
             file_name = x.name
-            select_path = x.path
-            raw_candidate = os.path.join(raw_dir, file_name)
-            if os.path.exists(raw_candidate) and not os.path.samefile(
-                select_path, raw_candidate
-            ):
-                select_md5 = get_file_md5_hash(select_path)
+            raw_candidate = raw_dir / file_name
+            if raw_candidate.exists() and not x.samefile(raw_candidate):
+                select_md5 = get_file_md5_hash(x)
                 raw_md5 = get_file_md5_hash(raw_candidate)
                 if select_md5 == raw_md5:
                     print(
-                        f"{dry_run_info}{INDENT}🔗 {select_path} <- {PROJECT_RAW_SUBDIR}/{file_name}"
+                        f"{dry_run_info}{INDENT}🔗 {x}"
+                        f" <- {PROJECT_RAW_SUBDIR}/{file_name}"
                     )
                     if not dry_run:
-                        os.unlink(select_path)
-                        os.link(raw_candidate, select_path)
+                        x.unlink()
+                        os.link(raw_candidate, x)
                 else:
                     print(
-                        f"{dry_run_info}{INDENT}⚠️ {x.path} content (MD5:{select_md5}) is different from {PROJECT_RAW_SUBDIR}/{x.name} (MD5:{raw_md5})"
+                        f"{dry_run_info}{INDENT}⚠️ {x} content"
+                        f" (MD5:{select_md5}) is different from"
+                        f" {PROJECT_RAW_SUBDIR}/{x.name} (MD5:{raw_md5})"
                     )
 
 
-def set_file_mode(path: str, mode: int, display_path: str, dry_run: bool):
+def set_file_mode(path: Path, mode: int, display_path: str, dry_run: bool):
     dry_run_info = get_dry_run_info(dry_run)
     print(f"{dry_run_info}{INDENT}✔️ {oct(mode)} {display_path}")
     if not dry_run:
-        os.chmod(path, mode)
+        path.chmod(mode)
 
 
-def set_file_readonly(path: str, display_path: str, dry_run: bool):
-    mode = os.stat(path).st_mode
-    if mode & 0o000333 :
+def set_file_readonly(path: Path, display_path: str, dry_run: bool):
+    mode = path.stat().st_mode
+    if mode & 0o000333:
         new_mode = mode & 0o777444
         set_file_mode(path, new_mode, display_path, dry_run)
 
 
-def set_file_readwrite(path: str, display_path: str, dry_run: bool):
-    mode = os.stat(path).st_mode
-    if (mode & 0o000111) or ((mode & 0o000666) != 0o000666):
-        new_mode = (mode & 0o777666) | 0o000666
+def set_file_readwrite(path: Path, display_path: str, dry_run: bool):
+    mode = path.stat().st_mode
+    if (mode & 0o000111) or ((mode & FILE_RW_MASK) != FILE_RW_MASK):
+        new_mode = (mode & 0o777666) | FILE_RW_MASK
         set_file_mode(path, new_mode, display_path, dry_run)
 
 
-def set_files_permissions(project_path: str, hardlink_selects: bool, dry_run: bool):
-    raw_path_set = set()
+def set_files_permissions(project_path: Path, hardlink_selects: bool, dry_run: bool):
+    raw_path_set: set[Path] = set()
 
-    raw_dir = os.path.join(project_path, PROJECT_RAW_SUBDIR)
-    if os.path.exists(raw_dir):
-        raw_files = [x for x in os.scandir(raw_dir) if x.is_file()]
-        for x in raw_files:
-            set_file_readonly(x.path, f"{PROJECT_RAW_SUBDIR}/{x.name}", dry_run)
-            raw_path_set.add(x.path)
+    raw_dir = project_path / PROJECT_RAW_SUBDIR
+    if raw_dir.exists():
+        for x in raw_dir.iterdir():
+            if x.is_file():
+                set_file_readonly(x, f"{PROJECT_RAW_SUBDIR}/{x.name}", dry_run)
+                raw_path_set.add(x)
 
-    project_root_files = [x for x in os.scandir(project_path) if x.is_file()]
-    for x in project_root_files:
-        if hardlink_selects and (x.path in raw_path_set):
-            continue
-        else:
-            _, file_extension = os.path.splitext(x.path)
-            if file_extension.lower() == '.xmp':
-                set_file_readwrite(x.path, x.name, dry_run)
+    for x in project_path.iterdir():
+        if x.is_file():
+            if hardlink_selects and (x in raw_path_set):
+                continue
+            if x.suffix.lower() == ".xmp":
+                set_file_readwrite(x, x.name, dry_run)
             else:
-                set_file_readonly(x.path, x.name, dry_run)
+                set_file_readonly(x, x.name, dry_run)
 
 
 def cleanup_project(
-    project_path: str,
+    project_path: Path,
     remove_dotfiles: bool,
     remove_edits: bool,
     remove_exports: bool,
@@ -233,7 +231,7 @@ def cleanup_project(
 
 
 def cleanup_photo_library(
-    library_path: str,
+    library_path: Path,
     remove_dotfiles: bool,
     remove_edits: bool,
     remove_exports: bool,
@@ -279,54 +277,48 @@ if __name__ == "__main__":
     parser.add_argument("library", type=str, help="photo library path")
     parser.add_argument(
         "--remove_dotfiles",
-        type=bool,
         help="remove ._* files",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=True
     )
     parser.add_argument(
         "--remove_edits",
-        type=bool,
         help="remove files from 1_EDIT",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=True
     )
     parser.add_argument(
         "--remove_exports",
-        type=bool,
         help="remove files from 2_EXPORT",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=False
     )
     parser.add_argument(
         "--hardlink_selects",
-        type=bool,
         help="replace selects with hardlinks to matching files in 0_RAW",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=True
     )
     parser.add_argument(
         "--fix_permissions",
-        type=bool,
         help="remove executable flag and make raw files read-only",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=True
     )
     parser.add_argument(
         "--dry_run",
-        type=bool,
         help="print actions to be performed, but do not remove or modify any files",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=False
     )
 
     args = parser.parse_args()
 
-    if not os.path.isdir(args.library):
+    if not Path(args.library).is_dir():
         raise ApplicationError(f'Photo library directory not found: "{args.library}"')
 
     cleanup_photo_library(
-        args.library,
+        Path(args.library),
         args.remove_dotfiles,
         args.remove_edits,
         args.remove_exports,

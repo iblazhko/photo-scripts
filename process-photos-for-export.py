@@ -22,8 +22,8 @@ into 2_EXPORT:
         file1-BW.jpg
         file2.jpg
 
-* Exported files are rescaled to fit small/medium/large export size and converted to JPEG
-    [--size large|medium|small] (default=large)
+* Exported files are rescaled to fit small/medium/large export size,
+    converted to JPEG [--size large|medium|small] (default=large)
 * White border is added (around 5%, optional)
     [--border | --no-border] (default=True)
 * Basic EXIF metadata is copied from raw / OOC JPEG files to resulting JPEGs
@@ -61,10 +61,8 @@ THE SOFTWARE.
 
 import argparse
 import copy
-import glob
 import json
 import os
-import pathlib
 import re
 import subprocess
 from dataclasses import dataclass
@@ -119,10 +117,10 @@ class ApplicationError(Exception):
 
 @dataclass
 class ProjectLocations:
-    project_dir: str
-    raw_dir: str
-    edit_dir: str
-    export_dir: str
+    project_dir: Path
+    raw_dir: Path
+    edit_dir: Path
+    export_dir: Path
 
 
 @dataclass
@@ -156,7 +154,7 @@ class ExifTag:
 
 @dataclass
 class MetadataOptions:
-    overrides_file: str
+    overrides_file: Path | None
 
 
 @dataclass
@@ -215,6 +213,13 @@ def get_border_options(size: str) -> BorderOptions:
 
 def get_resize_options(size: str, border: BorderOptions) -> ResizeOptions:
     match size:
+        case "x-large":
+            return ResizeOptions(
+                6000,
+                4500,
+                border,
+                99,
+            )
         case "large":
             return ResizeOptions(
                 4000,
@@ -241,7 +246,7 @@ def get_resize_options(size: str, border: BorderOptions) -> ResizeOptions:
 
 
 def get_metadata_options(overrides_rules_file: str):
-    return MetadataOptions(overrides_rules_file if overrides_rules_file else None)
+    return MetadataOptions(Path(overrides_rules_file) if overrides_rules_file else None)
 
 
 def map_exif_tag_from_json(tag_json: object) -> ExifTag:
@@ -263,9 +268,9 @@ def map_exif_override_rule_from_json(rule_json: object) -> MetadataOverrideRule:
     )
 
 
-def get_metadata_override_rules(rules_file: str) -> list[MetadataOverrideRule]:
-    if os.path.isfile(rules_file):
-        rules_json = json.loads(Path(rules_file).read_text())
+def get_metadata_override_rules(rules_file: Path) -> list[MetadataOverrideRule]:
+    if rules_file.is_file():
+        rules_json = json.loads(rules_file.read_text())
         return [map_exif_override_rule_from_json(x) for x in rules_json["rules"]]
     else:
         return []
@@ -295,21 +300,21 @@ def append_metadata_overrides(exif_tags: list[str], metadata_options: MetadataOp
 
 
 def get_project_locations() -> ProjectLocations:
-    project_dir = os.getcwd()
+    project_dir = Path.cwd()
 
-    raw_dir = os.path.join(project_dir, "0_RAW")
-    edit_dir = os.path.join(project_dir, "1_EDIT")
-    export_dir = os.path.join(project_dir, "2_EXPORT")
+    raw_dir = project_dir / "0_RAW"
+    edit_dir = project_dir / "1_EDIT"
+    export_dir = project_dir / "2_EXPORT"
 
-    if not os.path.isdir(raw_dir):
+    if not raw_dir.is_dir():
         raise ApplicationError(f'Raw images directory not found: "{raw_dir}"')
 
-    if not os.path.isdir(edit_dir):
+    if not edit_dir.is_dir():
         raise ApplicationError(f'Edited images directory not found: "{edit_dir}"')
 
-    if not os.path.isdir(export_dir):
-        os.mkdir(export_dir)
-        if not os.path.isdir(export_dir):
+    if not export_dir.is_dir():
+        export_dir.mkdir()
+        if not export_dir.is_dir():
             raise ApplicationError(
                 f'Exported images directory not found: "{export_dir}"'
             )
@@ -317,12 +322,11 @@ def get_project_locations() -> ProjectLocations:
     return ProjectLocations(project_dir, raw_dir, edit_dir, export_dir)
 
 
-def get_edited_files(edit_dir: str) -> list[str]:
-    edits_glob = os.path.join(edit_dir, f"*.{EDIT_FORMAT}")
-    files = [pathlib.Path(f).stem for f in glob.glob(edits_glob)]
+def get_edited_files(edit_dir: Path) -> list[str]:
+    files = [f.stem for f in edit_dir.glob(f"*.{EDIT_FORMAT}")]
 
     if not any(files):
-        raise ApplicationError(f'No "{edits_glob}" files found')
+        raise ApplicationError(f'No "*.{EDIT_FORMAT}" files found in "{edit_dir}"')
 
     return files
 
@@ -332,10 +336,8 @@ def convert_tiff_to_jpeg(
 ):
     target_normalized_name = file.removesuffix("-Enhanced-NR")
 
-    source_file = os.path.join(locations.edit_dir, f"{file}.{EDIT_FORMAT}")
-    target_file = os.path.join(
-        locations.export_dir, f"{target_normalized_name}.{EXPORT_FORMAT}"
-    )
+    source_file = locations.edit_dir / f"{file}.{EDIT_FORMAT}"
+    target_file = locations.export_dir / f"{target_normalized_name}.{EXPORT_FORMAT}"
 
     # fmt: off
     border_options = []
@@ -355,21 +357,21 @@ def convert_tiff_to_jpeg(
         ])
 
     magick = [
-                "magick",
-                "-quiet",
-                source_file,
-                "-filter",  "LanczosSharp",
-                "-resize",  f"{resize_options.image_width}x{resize_options.image_height}>",
-            ] + border_options + [
-                "-quality", f"{resize_options.quality}",
-                target_file,
-            ]
+        "magick",
+        "-quiet",
+        str(source_file),
+        "-filter", "LanczosSharp",
+        "-resize", f"{resize_options.image_width}x{resize_options.image_height}>",
+        *border_options,
+        "-quality", f"{resize_options.quality}",
+        str(target_file),
+    ]
     # fmt: on
 
     if verbose:
         print()
         print(" ".join(magick))
-    subprocess.run(magick)
+    subprocess.run(magick, check=False)
 
 
 def copy_metadata(
@@ -381,46 +383,40 @@ def copy_metadata(
     source_normalized_name = file.removesuffix("-BW").removesuffix("-Enhanced-NR")
     target_normalized_name = file.removesuffix("-Enhanced-NR")
 
-    source_file = os.path.join(
-        locations.raw_dir, f"{source_normalized_name}.{OOC_FORMAT}"
-    )
-    target_file = os.path.join(
-        locations.export_dir, f"{target_normalized_name}.{EXPORT_FORMAT}"
-    )
+    source_file = locations.raw_dir / f"{source_normalized_name}.{OOC_FORMAT}"
+    target_file = locations.export_dir / f"{target_normalized_name}.{EXPORT_FORMAT}"
 
-    # prefer out of the camera JPEG as metadata source, otherwise use RAW or enhanced DNG
-    if not os.path.isfile(source_file):
+    # prefer OOC JPEG as metadata source, fall back to RAW or enhanced DNG
+    if not source_file.is_file():
         pattern = f"{source_normalized_name}*.*"
-        raw_file_glob = os.path.join(locations.raw_dir, pattern)
-        matching_raw_files = glob.glob(raw_file_glob)
+        matching_raw_files = sorted(locations.raw_dir.glob(pattern))
         if not any(matching_raw_files):
-            raw_file_glob = os.path.join(locations.project_dir, pattern)
-            matching_raw_files = glob.glob(raw_file_glob)
+            matching_raw_files = sorted(locations.project_dir.glob(pattern))
             if not any(matching_raw_files):
                 raise ApplicationError(
                     f'No "{pattern}" files found to copy metadata from'
                 )
         source_file = matching_raw_files[0]
 
-    exiv2_cleanup = ["exiv2", "rm", target_file]
+    exiv2_cleanup = ["exiv2", "rm", str(target_file)]
 
     if verbose:
         print()
         print(" ".join(exiv2_cleanup))
-    exiv2_cleanup_process = subprocess.run(exiv2_cleanup)
+    exiv2_cleanup_process = subprocess.run(exiv2_cleanup, check=False)
     if exiv2_cleanup_process.returncode != 0:
         raise ApplicationError(f"Could not clean metadata for {target_file}")
 
     exiv2_tags_options = []
     for x in EXIF_TAGS:
         exiv2_tags_options.extend(["-K", x])
-    exiv2_export = ["exiv2", "-PVk"] + exiv2_tags_options + [source_file]
+    exiv2_export = ["exiv2", "-PVk", *exiv2_tags_options, str(source_file)]
 
     if verbose:
         print()
         print(" ".join(exiv2_export))
     exiv2_export_process = subprocess.run(
-        exiv2_export, capture_output=True, encoding="utf-8"
+        exiv2_export, capture_output=True, encoding="utf-8", check=False
     )
     if exiv2_export_process.returncode != 0:
         raise ApplicationError(f"Could not get metadata from {source_file}")
@@ -437,9 +433,9 @@ def copy_metadata(
         print(f"exiv2 -m- {target_file} <<EOF")
         print(exiv2_import_input)
         print("EOF")
-    exiv2_import = ["exiv2", "-m-", target_file]
+    exiv2_import = ["exiv2", "-m-", str(target_file)]
     exiv2_import_process = subprocess.run(
-        exiv2_import, input=exiv2_import_input, text=True
+        exiv2_import, input=exiv2_import_input, text=True, check=False
     )
     if exiv2_import_process.returncode != 0:
         raise ApplicationError(f"Could not set metadata for {target_file}")
@@ -452,8 +448,8 @@ def process_for_sharing(
     verbose: bool,
 ):
     if not metadata_options.overrides_file:
-        default_exif_json = str(Path.home() / "Pictures" / "Library" / "exif.json")
-        if os.path.isfile(default_exif_json):
+        default_exif_json = Path.home() / "Pictures" / "Library" / "exif.json"
+        if default_exif_json.is_file():
             metadata_options.overrides_file = default_exif_json
 
     print(f'PROJECT        : "{locations.project_dir}"')
@@ -464,12 +460,9 @@ def process_for_sharing(
     print(
         f"Size           : {resize_options.image_width}x{resize_options.image_height}"
     )
-    print(
-        f"Border         : {resize_options.border.size if resize_options.border else 'None'}"
-    )
-    print(
-        f"EXIF overrides : {metadata_options.overrides_file if metadata_options.overrides_file else 'None'}"
-    )
+    border_size = resize_options.border.size if resize_options.border else "None"
+    print(f"Border         : {border_size}")
+    print(f"EXIF overrides : {metadata_options.overrides_file or 'None'}")
     print("=" * 80)
 
     tiff_files = sorted(get_edited_files(locations.edit_dir))
@@ -485,7 +478,7 @@ def process_for_sharing(
     count = len(tiff_files)
     if verbose and count > 0:
         print("---")
-    print(f'Done ({count} {pluralize("file", count)})')
+    print(f"Done ({count} {pluralize('file', count)})")
 
 
 if __name__ == "__main__":
@@ -493,7 +486,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--size",
         type=str,
-        choices=["large", "medium", "small"],
+        choices=["x-large", "large", "medium", "small"],
         help="exported image size",
         default="large",
     )

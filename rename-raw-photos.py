@@ -51,18 +51,18 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
-import os
-import glob
-import pathlib
 import re
 import subprocess
+from pathlib import Path
 
 EXIV2_DATETIME_ORIGINAL = "Exif.Photo.DateTimeOriginal"
 
 exiv2_datetime_re = re.compile(
     "set "
     + EXIV2_DATETIME_ORIGINAL.replace(".", "\\.")
-    + "\\s*(Ascii)?\\s+(?P<year>\\d{4})\\:(?P<month>\\d{2})\\:(?P<day>\\d{2}) (?P<hour>\\d{2})\\:(?P<minute>\\d{2})\\:(?P<second>\\d{2})",
+    + "\\s*(Ascii)?\\s+"
+    + "(?P<year>\\d{4})\\:(?P<month>\\d{2})\\:(?P<day>\\d{2}) "
+    + "(?P<hour>\\d{2})\\:(?P<minute>\\d{2})\\:(?P<second>\\d{2})",
     re.IGNORECASE,
 )
 
@@ -71,21 +71,15 @@ class ApplicationError(Exception):
     pass
 
 
-def get_raw_path():
-    project_dir = os.getcwd()
-
-    raw_dir = os.path.join(project_dir, "0_RAW")
-    if not os.path.isdir(raw_dir):
+def get_raw_path() -> Path:
+    raw_dir = Path.cwd() / "0_RAW"
+    if not raw_dir.is_dir():
         raise ApplicationError(f'Raw images directory not found: "{raw_dir}"')
-
     return raw_dir
 
 
-def get_raw_files(raw_dir: str):
-    files = [
-        (pathlib.Path(f).stem, pathlib.Path(f).suffix)
-        for f in glob.glob(os.path.join(raw_dir, "*.*"))
-    ]
+def get_raw_files(raw_dir: Path):
+    files = [(f.stem, f.suffix) for f in raw_dir.glob("*.*")]
 
     if not any(files):
         raise ApplicationError(f'No files found in "{raw_dir}"')
@@ -93,21 +87,21 @@ def get_raw_files(raw_dir: str):
     return sorted(files, key=lambda x: f"{x[0]}.{x[1]}")
 
 
-def construct_new_raw_filename(raw_dir: str, raw_file: str, ext: str):
+def construct_new_raw_filename(raw_dir: Path, raw_file: str, ext: str):
     camera_number = raw_file[-4:]
     if not camera_number:
         raise ApplicationError(
-            f'Could not extract camera number: "{raw_dir}/{raw_file}{ext}"'
+            f'Could not extract camera number: "{raw_dir / f"{raw_file}{ext}"}"'
         )
 
-    raw_file_path = os.path.join(raw_dir, f"{raw_file}{ext}")
+    raw_file_path = raw_dir / f"{raw_file}{ext}"
 
     # fmt: off
     exiv2_timestamp = [
         "exiv2",
         "-PVk",
         "-K", EXIV2_DATETIME_ORIGINAL,
-        raw_file_path,
+        str(raw_file_path),
     ]
     # fmt: on
 
@@ -136,21 +130,24 @@ def construct_new_raw_filename(raw_dir: str, raw_file: str, ext: str):
     ):
         raise ApplicationError(f'Could not extract EXIF timestamp: "{raw_file_path}"')
 
-    new_name = f"{timestamp_year}{timestamp_month}{timestamp_day}_{timestamp_hour}{timestamp_minute}_{camera_number}"
+    new_name = (
+        f"{timestamp_year}{timestamp_month}{timestamp_day}"
+        f"_{timestamp_hour}{timestamp_minute}_{camera_number}"
+    )
 
     return (new_name, ext.lower())
 
 
 def rename_raw_file(
-    raw_dir: str,
+    raw_dir: Path,
     original_name: str,
     original_extension: str,
     new_name: str,
     new_extension: str,
 ):
-    original_file = os.path.join(raw_dir, f"{original_name}{original_extension}")
-    new_file = os.path.join(raw_dir, f"{new_name}{new_extension}")
-    os.rename(original_file, new_file)
+    original_file = raw_dir / f"{original_name}{original_extension}"
+    new_file = raw_dir / f"{new_name}{new_extension}"
+    original_file.rename(new_file)
 
 
 def rename_all_raw_files():
@@ -164,8 +161,9 @@ def rename_all_raw_files():
     else:
         for f, e in raw_files:
             new_name, new_extension = construct_new_raw_filename(raw_dir, f, e)
-            print(f"{f}{e} -> {new_name}{new_extension}")
-            rename_raw_file(raw_dir, f, e, new_name, new_extension)
+            if new_name != f or new_extension != e:
+                print(f"{f}{e} -> {new_name}{new_extension}")
+                rename_raw_file(raw_dir, f, e, new_name, new_extension)
         print("Done")
 
 
